@@ -12,9 +12,18 @@ import getpass
 import io
 import sys
 import types
+from enum import Enum
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+
+from cryptography.hazmat.primitives.asymmetric import ec  # noqa: E402
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat  # noqa: E402
+
+CARD_SCALAR = 0xC0FFEE
+CARD_PUB = ec.derive_private_key(CARD_SCALAR, ec.SECP256K1()).public_key()
+CARD_PUB_UNCOMPRESSED = CARD_PUB.public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
+CARD_PUB_COMPRESSED = CARD_PUB.public_bytes(Encoding.X962, PublicFormat.CompressedPoint).hex()
 
 N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
 PATH = "m/43'/60'/1581'/1397249618'/0"
@@ -30,9 +39,10 @@ class Versions:
 
 
 class FakeCard:
-    def __init__(self, signature, version=Versions.V1, **failures):
+    def __init__(self, signature, version=Versions.V1, public_key=CARD_PUB_UNCOMPRESSED, **failures):
         self.signature = signature
         self.secure_channel_version = version
+        self.public_key = public_key
         self.calls = []
         self.failures = failures
 
@@ -70,34 +80,53 @@ class FakeCard:
     def sign_with_path(self, digest, path):
         self.calls.append(f"sign:{len(digest)}:{path}")
         self._fail("sign")
-        return types.SimpleNamespace(signature=self.signature)
+        # SignatureResult always carries the field; a card that names no key leaves it None.
+        return types.SimpleNamespace(signature=self.signature, public_key=self.public_key)
 
 
-def run_signer(card, prompts=("123456",)):
+def _install(card, prompts):
+    queue = list(prompts)
+    class DerivationOption(Enum):
+        CURRENT = 0
+        DERIVE = 1
+        DERIVE_AND_MAKE_CURRENT = 2
+        PINLESS = 3
+
     module = types.ModuleType("keycard")
     card_module = types.ModuleType("keycard.keycard")
     channel_module = types.ModuleType("keycard.secure_channel")
+    constants_module = types.ModuleType("keycard.constants")
+    constants_module.DerivationOption = DerivationOption
     card_module.KeyCard = lambda: card
     channel_module.SecureChannelVersion = Versions
     module.keycard = card_module
     module.secure_channel = channel_module
     sys.modules.update({
+        "keycard.constants": constants_module,
         "keycard": module,
         "keycard.keycard": card_module,
         "keycard.secure_channel": channel_module,
     })
 
-    queue = list(prompts)
     getpass.getpass = lambda prompt="": queue.pop(0)
     sys.modules.pop("keycardsign", None)
     import keycardsign
 
-    return keycardsign.keycard_sign(PATH, DIGEST)
+    return keycardsign
 
 
 def low_s(s_bytes):
     s = int.from_bytes(s_bytes, "big")
     return (N - s) if s > N // 2 else s
+
+
+def run_signer(card, prompts=("123456",)):
+    signature, _ = _install(card, prompts).keycard_sign(PATH, DIGEST)
+    return signature
+
+
+def run_signer_and_key(card, prompts=("123456",)):
+    return _install(card, prompts).keycard_sign(PATH, DIGEST)
 
 
 def run(**kwargs):
@@ -192,6 +221,26 @@ def a_failed_unpair_does_not_mask_the_real_failure():
     assert "still paired" in stderr.getvalue(), stderr.getvalue()
 
 
+def the_pin_is_verified_before_the_card_is_used():
+    card = run()
+    run_signer(card)
+    order = [c.split(":")[0] for c in card.calls]
+    assert order.index("verify") < order.index("sign"), card.calls
+    assert order[-1] == "unpair", card.calls
+
+
+def the_key_the_card_reports_comes_back_compressed():
+    signature, reported = run_signer_and_key(run())
+    assert reported.hex() == CARD_PUB_COMPRESSED
+    assert signature == R + S_LOW
+
+
+
+def a_card_that_reports_no_key_is_not_an_error():
+    _, reported = run_signer_and_key(run(public_key=None))
+    assert reported is None, reported
+
+
 def wrong_length_is_refused():
     _expect_stop(lambda: run_signer(run(signature=b"\x01" * 63)))
 
@@ -219,6 +268,8 @@ tests = [
     high_s_is_canonicalised,
     a_slot_left_occupied_after_signing_stops_the_release,
     a_failed_unpair_does_not_mask_the_real_failure,
+    the_key_the_card_reports_comes_back_compressed,
+    a_card_that_reports_no_key_is_not_an_error,
     wrong_length_is_refused,
     out_of_range_components_are_refused,
 ]

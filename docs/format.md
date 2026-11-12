@@ -44,7 +44,7 @@ hash function would be another format version.
 Signing key `m/43'/60'/1581'/1397249618'/0`, the appid being `'SHVR'` as a big-endian u32. Verification
 key, compressed:
 
-    033dcc3ece8f9bc5a25c7ba30ddcc8c63bcdb03a562058bbb3234d6874b50f5fea
+    032ac68f2b2a500ebf1bc31f0c36e4645b24530ce6d1460e92c2d94e9a47ba550e
 
 Pin it. A client that takes the key from the same origin as the file gains nothing.
 

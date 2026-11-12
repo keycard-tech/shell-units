@@ -15,6 +15,7 @@ import secrets
 import struct
 from datetime import datetime
 
+from sigutil import compact, pinned_verify_key, verifies
 from shvr import (
     FORMAT_VERSION,
     HEADER_SIZE,
@@ -157,6 +158,24 @@ def sign_local(key_bytes, digest):
     return r.to_bytes(32, "big") + s.to_bytes(32, "big")
 
 
+def resolve_expected_key(args, key_bytes):
+    """Which key the finished signature has to be by.
+
+    A locally signed development build is expected to match its own private key. A card build has no
+    private key in this process, so it is held to the key the page pins - that is the whole point of
+    pinning it, and it is what catches the wrong card or the wrong derivation path at signing time
+    rather than at release time.
+    """
+    if args.expect_verify_key:
+        value = args.expect_verify_key.strip()
+        if len(value) != 66:
+            value = open(value).read().strip()
+        return value.lower()
+    if key_bytes is not None:
+        return public_key_of(key_bytes).hex()
+    return pinned_verify_key()
+
+
 def public_key_of(key_bytes):
     from cryptography.hazmat.primitives.asymmetric import ec
     from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
@@ -182,6 +201,8 @@ def main():
     parser.add_argument("-d", "--dummy-sign", action="store_true",
                         help="digest and zeroes where the signature goes, to compare builds")
     parser.add_argument("--verify-key", metavar="FILE", help="write the pinned public key hex here")
+    parser.add_argument("--expect-verify-key", metavar="HEX|FILE",
+                        help="key the signature must be by; defaults to the card build's pinned key")
     args = parser.parse_args()
 
     if args.salt:
@@ -218,6 +239,7 @@ def main():
         raise SystemExit("choose exactly one of --sign-key, --new-key, --keycard, --dummy-sign")
 
     key_bytes = None
+    card_key = None
     if args.new_key:
         if os.path.exists(args.new_key):
             raise SystemExit(f"{args.new_key} exists, refusing to overwrite a signing key")
@@ -235,12 +257,25 @@ def main():
         from keycardsign import keycard_sign
         from shvr import KEYCARD_PATH
 
-        signature = keycard_sign(KEYCARD_PATH, digest)
+        signature, card_key = keycard_sign(KEYCARD_PATH, digest)
     else:
         signature = digest + bytes(32)
 
     if len(signature) != SIG_SIZE:
         raise SystemExit("signature must be 64 bytes")
+
+    # Nothing unwritten has ever confused anyone. A file that carries a signature nobody can verify
+    # looks, from disk, exactly like a release.
+    if not args.dummy_sign:
+        expected = resolve_expected_key(args, key_bytes)
+        if not verifies(expected, digest, signature):
+            note = f"\ncard reported {card_key.hex()} at {KEYCARD_PATH}" if card_key else ""
+            raise SystemExit(
+                f"the signature just produced does not verify against {expected};{note}\n"
+                f"digest  {digest.hex()}\n"
+                f"signing {signature.hex()}\n"
+                "nothing was written"
+            )
 
     with open(args.output, "wb") as f:
         f.write(prefix + signature)

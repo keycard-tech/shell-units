@@ -1,34 +1,26 @@
-"""Sign a digest with a Keycard, for use as the production signing step of build-db.py.
+"""Sign a digest with a Keycard, as the production signing step of build-db.py.
 
-The card is read over the same transport the Keycard CLI uses; `keycard` must be importable. The
-derivation path convention and the 64 byte compact output match keycard-eth-db's tool, so the browser
-verifier is unchanged whichever key signed a release.
+The card derives from a single master seed, so it can sign at any path and holds no key per path.
+`sign_with_path` returns the derived key with the signature, which is the only way to learn which key
+signed; `sigutil.verifies` against the pinned key is what decides whether a release is valid.
 """
 
 import getpass
 import sys
 
-from shvr import SECP256K1_N
+from sigutil import compact, compress_point, signature_from_blob
 
-# A card blocks its PIN after three wrong attempts and needs the PUK to unblock, so the prompt loop
-# stops short of that instead of retrying forever.
+# A card blocks its PIN after three wrong attempts and needs the PUK to unblock.
 MAX_PIN_ATTEMPTS = 3
 
 
-def _card():
+def keycard_sign(path, digest, pin=None):
+    """(compact low-S signature, compressed key the card derived for `path`)."""
     try:
         from keycard.keycard import KeyCard
         from keycard.secure_channel import SecureChannelVersion
-    except ImportError as exc:
-        raise SystemExit(
-            "the keycard package is required for --keycard (pip install keycard); "
-            "use --sign-key with a hex key for anything that is not a release"
-        ) from exc
-    return KeyCard, SecureChannelVersion
-
-
-def keycard_sign(path, digest, pin=None):
-    KeyCard, SecureChannelVersion = _card()
+    except ImportError:
+        raise SystemExit("the keycard package is required for -k; use --sign-key otherwise")
 
     with KeyCard() as card:
         card.select()
@@ -37,8 +29,7 @@ def keycard_sign(path, digest, pin=None):
         if card.secure_channel_version == SecureChannelVersion.V1:
             pairing = card.pair("KeycardDefaultPairing")
 
-        # Everything after the pair is inside the try: a pairing left behind occupies a slot on the
-        # card, and the card is then unusable by the CLI or another machine until it is released.
+        # Everything after the pair is guarded: a pairing left behind occupies a slot on the card.
         signed = False
         try:
             card.open_secure_channel()
@@ -49,36 +40,24 @@ def keycard_sign(path, digest, pin=None):
             while not card.verify_pin(pin):
                 attempts += 1
                 if attempts >= MAX_PIN_ATTEMPTS:
-                    raise SystemExit(
-                        f"{attempts} wrong PINs, stopping before the card blocks its PIN"
-                    )
+                    raise SystemExit(f"{attempts} wrong PINs, stopping before the card blocks its PIN")
                 pin = getpass.getpass("Wrong PIN: ")
 
-            signature = card.sign_with_path(digest, path).signature
+            result = card.sign_with_path(digest, path)
             signed = True
         finally:
             if pairing is not None:
                 _unpair(card, pairing.slot, signed)
 
-    if len(signature) != 64:
-        raise SystemExit(f"card returned {len(signature)} bytes, expected a compact 64 byte signature")
-
-    # (r, n-s) verifies exactly where (r, s) does, so a release carries the same signature shape
-    # whether it was signed on a card or with --sign-key.
-    r, s = int.from_bytes(signature[:32], "big"), int.from_bytes(signature[32:], "big")
-    if not 0 < r < SECP256K1_N or not 0 < s < SECP256K1_N:
-        raise SystemExit("card returned a signature with r or s outside the group order")
-    if s > SECP256K1_N // 2:
-        s = SECP256K1_N - s
-    return r.to_bytes(32, "big") + s.to_bytes(32, "big")
+    signature = compact(*signature_from_blob(result.signature))
+    return signature, compress_point(result.public_key) if result.public_key else None
 
 
 def _unpair(card, slot, signed):
     """Release the pairing slot, loudly if that is not possible.
 
-    After a signature the artifact is already good, so a slot left occupied is the operator's problem
-    to fix immediately and has to stop the run. Before a signature, whatever went wrong is the more
-    useful message, so this reports and gets out of the way rather than masking it.
+    After a signature the artifact is good and an occupied slot must be cleared before the card is used
+    again, so that stops the run. Before a signature the original failure is the useful message.
     """
     try:
         card.unpair(slot)

@@ -78,7 +78,7 @@ anywhere else in the repository.
 
 `web/config.js` pins the verification key:
 
-    033dcc3ece8f9bc5a25c7ba30ddcc8c63bcdb03a562058bbb3234d6874b50f5fea
+    032ac68f2b2a500ebf1bc31f0c36e4645b24530ce6d1460e92c2d94e9a47ba550e
 
 Sign with a Keycard and keep it offline. A rebuild is not the same file: padding rows come from the OS
 CSPRNG and the ECDSA nonce is random. Pass `--salt` and `--no-decoys` and a rebuild reproduces the
