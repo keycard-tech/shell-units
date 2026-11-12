@@ -41,5 +41,6 @@ python3 tools/build-db.py \
 node tests/verify.test.mjs out/test-db.bin out/test-verify-key.hex out/test-devices.json \
   input-files/shell-batch-0.csv input-files/shell-batch-1.csv
 
+python3 tests/test_keycard_sign.py
 node tests/page.test.mjs out/test-db.bin out/test-devices.json
 node tests/privacy.test.mjs input-files/shell-batch-0.csv input-files/shell-batch-1.csv
