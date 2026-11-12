@@ -1,0 +1,10 @@
+The page loads no third-party code at runtime. web/dist/*.js are esbuild bundles of:
+
+  @noble/curves 2.4.0   MIT
+  @noble/hashes 2.4.0   MIT
+  @qntx/ur              MIT OR Apache-2.0  (bytewords, which is what the device encodes with)
+  qrcode-generator 1.5.0  MIT
+  jsqr 1.4.0            Apache-2.0
+
+built by `npm run bundle` from vendor-entry.js and scan-entry.js. License headers are kept inline
+in the bundles; the full texts ship with the packages in web/node_modules.

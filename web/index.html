@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shell device verification</title>
+<style>
+  :root { color-scheme: light dark; --line: color-mix(in srgb, currentColor 18%, transparent); }
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 46rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+  h1 { font-size: 1.3rem; margin: 0 0 .25rem; }
+  p.lede { margin: 0 0 2rem; opacity: .75; }
+  section { border-top: 1px solid var(--line); padding: 1.25rem 0; }
+  h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; margin: 0 0 .75rem; opacity: .65; }
+  button, input, textarea { font: inherit; }
+  button { padding: .45rem .8rem; border: 1px solid var(--line); border-radius: .4rem; background: transparent; cursor: pointer; }
+  button:hover { border-color: currentColor; }
+  input[type=text] { padding: .4rem .5rem; border: 1px solid var(--line); border-radius: .4rem; width: 100%; box-sizing: border-box; }
+  textarea { width: 100%; box-sizing: border-box; min-height: 5.5rem; border: 1px solid var(--line); border-radius: .4rem; padding: .5rem; font-family: ui-monospace, monospace; font-size: .8rem; }
+  .row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: .5rem 0; }
+  .row > * { flex: 0 0 auto; }
+  .row > input { flex: 1 1 14rem; }
+  pre { white-space: pre-wrap; word-break: break-all; font-size: .8rem; margin: .5rem 0 0; }
+  .result { border-left: 3px solid var(--line); padding: .6rem .8rem; margin: 1rem 0; border-radius: 0 .4rem .4rem 0; }
+  .result.ok   { border-color: #1c8a4c; }
+  .result.warn { border-color: #b8860b; }
+  .result.bad  { border-color: #c0392b; }
+  .result.neutral { opacity: .85; }
+  #qr { display: inline-block; background: #fff; padding: 12px; border-radius: 6px; }
+  #qr svg { display: block; shape-rendering: crispEdges; }
+  #video { width: 100%; max-width: 24rem; border-radius: .4rem; margin-top: .75rem; }
+  .meta { font-size: .8rem; opacity: .7; }
+  details { margin-top: 2rem; font-size: .9rem; }
+  summary { cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>Shell device verification</h1>
+<p class="lede">Offline check that a Shell is one of ours. The database is public, signed, and says
+nothing on its own: a row is only found by a device that can sign for it.</p>
+
+<div id="result" class="result neutral"><strong>No database loaded</strong></div>
+
+<section>
+  <h2>1 · Database</h2>
+  <div class="row">
+    <input type="file" id="file" accept=".bin,application/octet-stream">
+  </div>
+  <div class="row">
+    <input type="text" id="dbUrl" placeholder="./db.bin">
+    <button id="fetchUrl">Fetch</button>
+  </div>
+  <p class="meta">Pinned signing key: <code id="pinnedKey"></code></p>
+  <p class="meta" id="dbInfo"></p>
+</section>
+
+<section>
+  <h2>2 · Challenge the device</h2>
+  <div class="row">
+    <button id="startBtn">New verification</button>
+    <label class="meta">size
+      <select id="qrSize">
+        <option value="144">small</option>
+        <option value="192" selected>medium</option>
+        <option value="256">large</option>
+        <option value="336">larger</option>
+      </select>
+    </label>
+  </div>
+  <div id="session" hidden>
+    <div id="qr"></div>
+    <p class="meta" id="qrPx"></p>
+    <p class="meta">Challenge <code id="challengeHex"></code></p>
+    <p class="meta">If the Shell will not read it, go full brightness and try another size — the
+    camera has a focus range, and both too large and too small fail the same silent way.</p>
+  </div>
+</section>
+
+<section>
+  <h2>3 · Read its answer</h2>
+  <div class="row">
+    <button id="scanBtn">Scan with camera</button>
+  </div>
+  <video id="video" hidden playsinline muted></video>
+  <div class="row"><textarea id="response" placeholder="UR:DEV-AUTH/oeadadamhdcxaeadao…"></textarea></div>
+  <div class="row"><button id="checkBtn">Verify</button><span id="echo" class="echo"></span></div>
+</section>
+
+<details>
+  <summary>What is being checked</summary>
+  <p>The Shell signs <code>SHA256(uid ‖ challenge)</code> with a key derived from its hardware
+  secret. Two public keys satisfy any such signature, so both are recovered and hashed with the uid;
+  a match against the file is the verification. The signature is the proof — the device's identity
+  comes out of it, which is why the database never has to store or reveal a key.</p>
+  <p>Absence is reported separately from refusal: "not in this database" means a well-formed answer
+  from something that is not on the list, while a refusal means the file, the message or the format
+  is wrong and no conclusion about the device can be drawn.</p>
+  <p>Nothing leaves this page. The database is a file, the camera frames are never uploaded, and the
+  challenge is generated here and thrown away after one attempt.</p>
+</details>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

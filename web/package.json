@@ -1,0 +1,16 @@
+{
+  "name": "shvr-db-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bundle": "node build.mjs"
+  },
+  "dependencies": {
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
+    "@qntx/ur": "^3.0.0",
+    "esbuild": "^0.28.2",
+    "jsqr": "^1.4.0",
+    "qrcode-generator": "^1.5.0"
+  }
+}
